@@ -30,7 +30,7 @@ def test_render_report_adds_title_and_sources():
 
     report = render_report("Why?", "# A title the model added\n\nBecause [1].", sources)
 
-    assert report == ("# Why?\n\nBecause [1].\n\n## Sources\n\n1. [Docs (beta)](https://a.com)\n")
+    assert report == "# Why?\n\nBecause [1].\n\n## Sources\n\n1. [Docs (beta)](https://a.com)\n"
 
 
 def test_extract_json_finds_object_in_chatter():
