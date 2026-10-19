@@ -23,7 +23,6 @@ data/
 # editors / assistants
 .vscode/
 .idea/
-.claude/
 .cursor/
 
 # js leftovers
