@@ -91,9 +91,12 @@ curl -N -X POST localhost:8102/runs/<thread_id>/plan -H 'content-type: applicati
 # or {"approved": true, "plan": ["...", "..."]} to edit, {"approved": false} to reject
 
 curl localhost:8102/runs/<thread_id>    # status, plan, counters, report
+
+curl -N -X POST localhost:8102/runs/<thread_id>/resume
+# continues a run left `incomplete` by an error or a dropped connection
 ```
 
-Reviewing a run that isn't waiting for a plan gives a 409, an unknown id a 404. Errors that happen mid-stream arrive as an `error` event.
+The research runs inside the request that streams it, so if the client disconnects the run stops where it was and shows up as `incomplete`. Reviewing a run that isn't waiting for a plan, resuming one that isn't incomplete, or touching a run another request is still driving gives a 409. An unknown id gives a 404. Errors that happen mid-stream arrive as an `error` event.
 
 ### Docker
 

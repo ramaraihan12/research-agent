@@ -1,4 +1,6 @@
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
@@ -102,3 +104,61 @@ def test_model_failure_becomes_an_error_event(make_harness):
         events = start(client)
 
     assert events[-1] == ("error", {"message": "ConnectionError: model server is down"})
+
+
+def test_resume_picks_up_a_run_that_failed_partway(make_harness):
+    model_is_down = True
+
+    def notes(user: str) -> str:
+        if model_is_down:
+            raise ConnectionError("model server is down")
+        return "- tide pools hold water at low tide"
+
+    harness = make_harness(replies={"notes": notes})
+    with TestClient(create_app(harness.graph)) as client:
+        thread_id = start(client)[0][1]["thread_id"]
+        events = parse_sse(client.post(f"/runs/{thread_id}/plan", json={}).text)
+        assert events[-1][0] == "error"
+        assert client.get(f"/runs/{thread_id}").json()["status"] == "incomplete"
+
+        model_is_down = False
+        events = parse_sse(client.post(f"/runs/{thread_id}/resume").text)
+
+    assert events[-1][0] == "done"
+    assert "## Sources" in events[-1][1]["report"]
+
+
+def test_resume_only_works_on_incomplete_runs(client):
+    thread_id = start(client)[0][1]["thread_id"]
+
+    response = client.post(f"/runs/{thread_id}/resume")
+
+    assert response.status_code == 409
+    assert client.post("/runs/nope/resume").status_code == 404
+
+
+def test_a_run_that_is_still_going_cannot_be_driven_again(make_harness):
+    in_research = threading.Event()
+    release = threading.Event()
+
+    def slow_notes(user: str) -> str:
+        in_research.set()
+        release.wait(5)
+        return "- tide pools hold water at low tide"
+
+    harness = make_harness(replies={"notes": slow_notes})
+    with TestClient(create_app(harness.graph)) as client, ThreadPoolExecutor(1) as pool:
+        thread_id = start(client)[0][1]["thread_id"]
+        first = pool.submit(client.post, f"/runs/{thread_id}/plan", json={})
+        assert in_research.wait(5)
+
+        resumed = client.post(f"/runs/{thread_id}/resume")
+        reviewed = client.post(f"/runs/{thread_id}/plan", json={})
+        release.set()
+
+        assert parse_sse(first.result().text)[-1][0] == "done"
+        assert client.get(f"/runs/{thread_id}").json()["status"] == "done"
+
+    assert resumed.status_code == 409
+    assert resumed.json()["detail"] == "run is already in progress"
+    assert reviewed.status_code == 409

@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from research_agent.state import ResearchState
 
 type Graph = CompiledStateGraph[ResearchState]
+type RunState = Literal["awaiting_approval", "incomplete", "done"]
 
 
 @dataclass(frozen=True)
@@ -23,7 +24,7 @@ class Event:
 
 class RunStatus(BaseModel):
     thread_id: str
-    status: Literal["awaiting_approval", "incomplete", "done"]
+    status: RunState
     question: str
     plan: list[str] = []
     rounds: int = 0
