@@ -112,3 +112,20 @@ async def test_no_usable_pages_still_produces_a_report(make_harness, thread):
     assert "couldn't find any usable pages" in final["report"]
     assert "## Sources" not in final["report"]
     assert h.model.count("write") == 0
+
+
+async def test_a_dropped_model_call_is_retried(make_harness, thread):
+    attempts = []
+
+    def flaky(user: str) -> str:
+        attempts.append(user)
+        if len(attempts) == 1:
+            raise ConnectionError("model runner restarted")
+        return json.dumps({"sub_questions": ["what are tide pools"]})
+
+    h = make_harness(replies={"plan": flaky})
+
+    result = await h.graph.ainvoke({"question": QUESTION}, thread)
+
+    assert len(attempts) == 2
+    assert result["__interrupt__"][0].value["plan"] == ["what are tide pools"]

@@ -7,7 +7,7 @@ from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.types import Send, interrupt
+from langgraph.types import RetryPolicy, Send, interrupt
 from pydantic import BaseModel, ValidationError
 
 from research_agent import prompts
@@ -20,6 +20,10 @@ from research_agent.state import Note, PlanReview, ResearchState, ResearchTask
 
 _LIST_ITEM = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(.+)$")
 MAX_QUESTION_CHARS = 300
+
+# A local model server can drop a request when the GPU is busy or the model reloads.
+# LangGraph's default retry_on skips programming errors and retries the rest.
+MODEL_RETRY = RetryPolicy(max_attempts=3, initial_interval=2.0)
 
 
 @dataclass(frozen=True)
@@ -36,7 +40,9 @@ class Reflection(BaseModel):
 
 
 def build_graph(
-    deps: Deps, checkpointer: BaseCheckpointSaver | None = None
+    deps: Deps,
+    checkpointer: BaseCheckpointSaver | None = None,
+    retry: RetryPolicy = MODEL_RETRY,
 ) -> CompiledStateGraph[ResearchState]:
     limits = deps.limits
 
@@ -146,11 +152,11 @@ def build_graph(
         return dispatch(state, limits) or "write"
 
     builder = StateGraph(ResearchState)
-    builder.add_node("plan", plan)
+    builder.add_node("plan", plan, retry_policy=retry)
     builder.add_node("review_plan", review_plan)
-    builder.add_node("research", research)
-    builder.add_node("reflect", reflect)
-    builder.add_node("write", write)
+    builder.add_node("research", research, retry_policy=retry)
+    builder.add_node("reflect", reflect, retry_policy=retry)
+    builder.add_node("write", write, retry_policy=retry)
     builder.add_edge(START, "plan")
     builder.add_edge("plan", "review_plan")
     builder.add_conditional_edges("review_plan", after_review, ["research", "write", END])

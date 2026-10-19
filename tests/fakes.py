@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import RetryPolicy
 from pydantic import Field
 
 from research_agent import prompts
@@ -17,6 +18,8 @@ from research_agent.graph import Deps, build_graph
 from research_agent.search import SearchResult
 
 Reply = str | Callable[[str], str]
+
+FAST_RETRY = RetryPolicy(max_attempts=3, initial_interval=0.01, jitter=False)
 
 
 class ScriptedChatModel(BaseChatModel):
@@ -118,4 +121,4 @@ class Harness:
         self.fetcher = StubFetcher()
         self.deps = Deps(model=model, search=self.search, fetcher=self.fetcher, limits=limits)
         self.checkpointer = checkpointer or InMemorySaver()
-        self.graph = build_graph(self.deps, self.checkpointer)
+        self.graph = build_graph(self.deps, self.checkpointer, retry=FAST_RETRY)
