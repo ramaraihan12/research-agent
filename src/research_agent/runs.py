@@ -83,10 +83,10 @@ def progress_event(node: str, update: dict[str, Any]) -> Event:
     match node:
         case "plan":
             data["plan"] = update.get("plan", [])
-            message = f"drafted a plan with {len(data['plan'])} sub-questions"
+            message = f"drafted a plan with {plural(len(data['plan']), 'sub-question')}"
         case "review_plan" if update.get("approved"):
             data["plan"] = update.get("plan", [])
-            message = f"plan approved ({len(data['plan'])} sub-questions)"
+            message = f"plan approved ({plural(len(data['plan']), 'sub-question')})"
         case "review_plan":
             data["stop_reason"] = update.get("stop_reason")
             message = f"stopped: {data['stop_reason']}"
@@ -98,8 +98,8 @@ def progress_event(node: str, update: dict[str, Any]) -> Event:
                 "notes": len(update.get("notes", [])),
             }
             message = (
-                f'searched "{question}": read {data["pages_read"]} pages, '
-                f"kept {data['notes']} notes"
+                f'searched "{question}": read {plural(data["pages_read"], "page")}, '
+                f"kept {plural(data['notes'], 'note')}"
             )
         case "reflect":
             data |= {
@@ -118,3 +118,7 @@ def progress_event(node: str, update: dict[str, Any]) -> Event:
         case _:
             message = node
     return Event("progress", data, message)
+
+
+def plural(count: int, word: str) -> str:
+    return f"{count} {word}" if count == 1 else f"{count} {word}s"
