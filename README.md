@@ -55,7 +55,7 @@ Limits are hard caps, not suggestions: rounds, total pages, pages per sub-questi
 - LangChain `init_chat_model`: Ollama by default, OpenAI, Gemini or Anthropic through config
 - DuckDuckGo via `ddgs` (Tavily if you set a key), httpx + trafilatura
 - Typer CLI, FastAPI with server-sent events
-- pytest, ruff, GitHub Actions, Docker
+- pytest, ruff, pyright, GitHub Actions, Docker
 
 ## Run it
 
@@ -118,7 +118,7 @@ The graph tests use a scripted fake chat model and a stubbed search and fetcher,
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/research_agent uv run pytest -m postgres
 ```
 
-Lint is `uv run ruff check . && uv run ruff format --check .`
+Lint and types: `uv run ruff check . && uv run ruff format --check . && uv run pyright src`
 
 ## Notes
 
