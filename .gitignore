@@ -1,0 +1,31 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# tools
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# env and local data
+.env
+.env.*
+!.env.example
+reports/
+data/
+
+# editors / assistants
+.vscode/
+.idea/
+.claude/
+.cursor/
+
+# js leftovers
+node_modules/
+vendor/

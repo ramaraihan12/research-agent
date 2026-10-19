@@ -1,0 +1,56 @@
+[project]
+name = "research-agent"
+version = "0.1.0"
+description = "A LangGraph research agent: plan, approve, search, read, write a cited report."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph>=1.2.16",
+    "langgraph-checkpoint-postgres>=3.2.0",
+    "langchain>=1.4.6",
+    "langchain-core>=1.6.12",
+    "langchain-ollama>=1.1.0",
+    "psycopg[binary]>=3.3.6",
+    "psycopg-pool>=3.3.3",
+    "ddgs>=9.16.0",
+    "httpx>=0.28.1",
+    "trafilatura>=2.3.1",
+    "pydantic-settings>=2.16.0",
+    "typer>=0.27.3",
+    "fastapi>=0.146.0",
+    "uvicorn>=0.54.0",
+]
+
+[project.optional-dependencies]
+openai = ["langchain-openai>=1.7.2"]
+gemini = ["langchain-google-genai>=4.4.2"]
+anthropic = ["langchain-anthropic>=1.7.6"]
+tavily = ["tavily-python>=0.8.5"]
+
+[project.scripts]
+research-agent = "research_agent.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.17.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.10.4,<0.11"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "ASYNC", "RUF"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = ["postgres: needs a reachable Postgres (DATABASE_URL), skipped otherwise"]
