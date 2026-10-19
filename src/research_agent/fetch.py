@@ -17,6 +17,7 @@ USER_AGENT = (
     "Mozilla/5.0 (compatible; research-agent/0.1; +https://github.com/ramaraihan12/research-agent)"
 )
 MIN_TEXT_CHARS = 200
+MAX_REDIRECTS = 5
 
 
 @dataclass(frozen=True)
@@ -47,8 +48,6 @@ class PageFetcher:
         self._max_chars = max_chars
 
     async def fetch(self, result: SearchResult) -> Page | None:
-        if not is_public_http_url(result.url):
-            return None
         try:
             async with asyncio.timeout(self._timeout):
                 raw, content_type, encoding = await self._download(result.url)
@@ -70,18 +69,28 @@ class PageFetcher:
         )
 
     async def _download(self, url: str) -> tuple[bytes | None, str, str | None]:
-        async with self._client.stream("GET", url) as response:
-            content_type = response.headers.get("content-type", "").lower()
-            if response.status_code >= 400 or not (
-                "html" in content_type or content_type.startswith("text/plain")
-            ):
-                return None, content_type, None
-            body = bytearray()
-            async for chunk in response.aiter_bytes():
-                body.extend(chunk)
-                if len(body) >= self._max_bytes:
-                    break
-            return bytes(body[: self._max_bytes]), content_type, response.encoding
+        # Redirects are followed by hand so every hop gets the same address check.
+        for _ in range(MAX_REDIRECTS + 1):
+            if not is_public_http_url(url):
+                log.info("not fetching %s: not a public address", url)
+                return None, "", None
+            async with self._client.stream("GET", url, follow_redirects=False) as response:
+                if response.next_request is not None:
+                    url = str(response.next_request.url)
+                    continue
+                content_type = response.headers.get("content-type", "").lower()
+                if response.status_code >= 400 or not (
+                    "html" in content_type or content_type.startswith("text/plain")
+                ):
+                    return None, content_type, None
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    body.extend(chunk)
+                    if len(body) >= self._max_bytes:
+                        break
+                return bytes(body[: self._max_bytes]), content_type, response.encoding
+        log.info("not fetching %s: more than %d redirects", url, MAX_REDIRECTS)
+        return None, "", None
 
 
 def extract_main_text(html: str, url: str) -> tuple[str, str]:
@@ -128,7 +137,5 @@ async def read_pages(fetcher: Fetcher, results: Sequence[SearchResult], limit: i
 def make_http_client(timeout: float) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         timeout=httpx.Timeout(timeout),
-        follow_redirects=True,
-        max_redirects=5,
         headers={"User-Agent": USER_AGENT, "Accept": "text/html,text/plain;q=0.9"},
     )

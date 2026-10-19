@@ -3,7 +3,7 @@ import asyncio
 import httpx
 import pytest
 
-from research_agent.fetch import Page, PageFetcher, is_public_http_url, read_pages
+from research_agent.fetch import MAX_REDIRECTS, Page, PageFetcher, is_public_http_url, read_pages
 from research_agent.search import SearchResult
 
 ARTICLE = """
@@ -22,7 +22,8 @@ ARTICLE = """
 
 
 def make_fetcher(handler, **overrides) -> PageFetcher:
-    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    # follow_redirects=True on purpose: the fetcher has to check each hop itself anyway.
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=True)
     options = {"timeout": 2.0, "max_bytes": 100_000, "max_chars": 5_000} | overrides
     return PageFetcher(client, **options)
 
@@ -100,6 +101,49 @@ async def test_never_requests_internal_addresses():
 
     for url in ["http://localhost:8000/", "http://127.0.0.1/", "http://10.0.0.5/", "file:///etc"]:
         assert await fetcher.fetch(result(url)) is None
+
+
+async def test_follows_redirects_between_public_hosts():
+    def handler(request):
+        if request.url.host == "old.example.com":
+            return httpx.Response(301, headers={"location": "https://new.example.com/tides"})
+        return httpx.Response(200, html=ARTICLE)
+
+    fetcher = make_fetcher(handler)
+
+    page = await fetcher.fetch(result("https://old.example.com/tides"))
+
+    assert page is not None
+    assert "rock hollows" in page.text
+
+
+@pytest.mark.parametrize(
+    "target", ["http://127.0.0.1/", "http://169.254.169.254/latest/meta-data/", "file:///etc"]
+)
+async def test_never_follows_a_redirect_to_an_internal_address(target):
+    requested: list[str] = []
+
+    def handler(request):
+        requested.append(str(request.url))
+        return httpx.Response(302, headers={"location": target})
+
+    fetcher = make_fetcher(handler)
+
+    assert await fetcher.fetch(result("https://example.com/go")) is None
+    assert requested == ["https://example.com/go"]
+
+
+async def test_gives_up_after_too_many_redirects():
+    requested: list[str] = []
+
+    def handler(request):
+        requested.append(str(request.url))
+        return httpx.Response(302, headers={"location": f"/hop{len(requested)}"})
+
+    fetcher = make_fetcher(handler)
+
+    assert await fetcher.fetch(result("https://example.com/loop")) is None
+    assert len(requested) == MAX_REDIRECTS + 1
 
 
 def test_public_url_check():
