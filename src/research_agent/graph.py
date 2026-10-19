@@ -56,11 +56,12 @@ def build_graph(
         return {"plan": sub_questions or [state["question"]], "tokens_used": reply.tokens}
 
     def review_plan(state: ResearchState) -> dict[str, Any]:
-        answer = interrupt({"question": state["question"], "plan": state["plan"]})
+        drafted = state.get("plan", [])
+        answer = interrupt({"question": state["question"], "plan": drafted})
         review = PlanReview.model_validate(answer)
         if not review.approved:
             return {"approved": False, "stop_reason": "plan rejected"}
-        edited = review.plan if review.plan is not None else state["plan"]
+        edited = review.plan if review.plan is not None else drafted
         sub_questions = clean_questions(edited, limits.max_sub_questions)
         if not sub_questions:
             return {"approved": False, "stop_reason": "plan was empty"}
@@ -143,7 +144,7 @@ def build_graph(
         )
         return {"report": render_report(question, reply.text, sources), "tokens_used": reply.tokens}
 
-    def after_review(state: ResearchState) -> list[Send] | Literal["write", "__end__"]:
+    def after_review(state: ResearchState) -> list[Send] | str:
         if not state.get("approved"):
             return END
         return dispatch(state, limits) or "write"
@@ -154,7 +155,8 @@ def build_graph(
     builder = StateGraph(ResearchState)
     builder.add_node("plan", plan, retry_policy=retry)
     builder.add_node("review_plan", review_plan)
-    builder.add_node("research", research, retry_policy=retry)
+    # Send hands research a ResearchTask, not the graph state. add_node's types can't say that.
+    builder.add_node("research", research, retry_policy=retry)  # pyright: ignore[reportArgumentType]
     builder.add_node("reflect", reflect, retry_policy=retry)
     builder.add_node("write", write, retry_policy=retry)
     builder.add_edge(START, "plan")

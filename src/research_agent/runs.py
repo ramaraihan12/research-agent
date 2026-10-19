@@ -13,6 +13,8 @@ from research_agent.state import ResearchState
 
 type Graph = CompiledStateGraph[ResearchState]
 type RunState = Literal["awaiting_approval", "incomplete", "done"]
+# A new question, a reply to the plan interrupt, or None to continue from the checkpoint.
+type RunInput = ResearchState | Command | None
 
 
 @dataclass(frozen=True)
@@ -38,9 +40,7 @@ def thread_config(thread_id: str) -> RunnableConfig:
     return {"configurable": {"thread_id": thread_id}}
 
 
-async def stream_run(
-    graph: Graph, payload: dict[str, Any] | Command | None, thread_id: str
-) -> AsyncIterator[Event]:
+async def stream_run(graph: Graph, payload: RunInput, thread_id: str) -> AsyncIterator[Event]:
     """Run until the graph pauses for a plan review or finishes."""
     config = thread_config(thread_id)
     async for chunk in graph.astream(payload, config, stream_mode="updates"):

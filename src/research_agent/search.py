@@ -50,7 +50,7 @@ class TavilySearch:
     """Optional, used when TAVILY_API_KEY is set (pip extra `tavily`)."""
 
     def __init__(self, api_key: str) -> None:
-        from tavily import AsyncTavilyClient, errors
+        from tavily import AsyncTavilyClient, errors  # pyright: ignore[reportMissingImports]
 
         self._client = AsyncTavilyClient(api_key=api_key)
         # Bad keys and forbidden requests are left to raise: those need fixing, not skipping.

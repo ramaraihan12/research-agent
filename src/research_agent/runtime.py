@@ -8,7 +8,8 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
-from psycopg.rows import dict_row
+from psycopg import AsyncConnection
+from psycopg.rows import DictRow, dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from research_agent.config import Settings
@@ -32,7 +33,7 @@ async def open_checkpointer(database_url: str | None) -> AsyncIterator[BaseCheck
     if not database_url:
         yield InMemorySaver()
         return
-    async with AsyncConnectionPool(
+    async with AsyncConnectionPool[AsyncConnection[DictRow]](
         database_url,
         min_size=1,
         max_size=5,

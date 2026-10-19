@@ -1,7 +1,7 @@
 import logging
 from collections.abc import AsyncIterable, AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import Annotated, Any
+from typing import Annotated
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -10,7 +10,7 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field
 
 from research_agent.config import get_settings
-from research_agent.runs import Graph, RunState, RunStatus, get_status, stream_run
+from research_agent.runs import Graph, RunInput, RunState, RunStatus, get_status, stream_run
 from research_agent.runtime import open_graph
 from research_agent.state import PlanReview
 
@@ -119,7 +119,7 @@ def claim_run(expected: RunState) -> Callable[..., AsyncIterator[str]]:
 
 
 async def sse_events(
-    graph: Graph, payload: dict[str, Any] | Command | None, thread_id: str
+    graph: Graph, payload: RunInput, thread_id: str
 ) -> AsyncIterator[ServerSentEvent]:
     try:
         async for event in stream_run(graph, payload, thread_id):

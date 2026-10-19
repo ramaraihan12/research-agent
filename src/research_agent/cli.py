@@ -7,8 +7,9 @@ import typer
 from langgraph.types import Command
 
 from research_agent.config import get_settings
-from research_agent.runs import Graph, get_status, stream_run
+from research_agent.runs import Graph, RunInput, get_status, stream_run
 from research_agent.runtime import open_graph, run_async
+from research_agent.state import ResearchState
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +67,7 @@ async def _resume(thread_id: str, yes: bool, out: Path | None) -> None:
         await _drive(graph, thread_id, payload, yes, out)
 
 
-async def _run(thread_id: str, payload: dict[str, Any], yes: bool, out: Path | None) -> None:
+async def _run(thread_id: str, payload: ResearchState, yes: bool, out: Path | None) -> None:
     async with open_graph(get_settings()) as graph:
         await _drive(graph, thread_id, payload, yes, out)
 
@@ -74,7 +75,7 @@ async def _run(thread_id: str, payload: dict[str, Any], yes: bool, out: Path | N
 async def _drive(
     graph: Graph,
     thread_id: str,
-    payload: dict[str, Any] | Command | None,
+    payload: RunInput,
     yes: bool,
     out: Path | None,
 ) -> None:

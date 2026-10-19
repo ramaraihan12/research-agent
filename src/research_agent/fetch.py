@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 
 import httpx
 import trafilatura
+from trafilatura.settings import Document
 
 from research_agent.search import SearchResult
 
@@ -125,7 +126,7 @@ def extract_main_text(html: str, url: str) -> tuple[str, str]:
         include_tables=True,
         include_images=False,
     )
-    if doc is None:
+    if not isinstance(doc, Document):
         return "", ""
     return doc.title or "", doc.text or ""
 
