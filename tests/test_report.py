@@ -21,7 +21,7 @@ def test_clean_citations():
     text = "One [1]. Two [1, 3]. Bad [4]. Link [docs](https://x.com). Year [2024]."
 
     assert clean_citations(text, source_count=3) == (
-        "One [1]. Two [1][3]. Bad . Link [docs](https://x.com). Year [2024]."
+        "One [1]. Two [1][3]. Bad. Link [docs](https://x.com). Year [2024]."
     )
 
 
