@@ -1,7 +1,8 @@
 import asyncio
 import ipaddress
 import logging
-from collections.abc import Sequence
+import socket
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 from urllib.parse import urlsplit
@@ -19,6 +20,8 @@ USER_AGENT = (
 MIN_TEXT_CHARS = 200
 MAX_REDIRECTS = 5
 
+type Resolver = Callable[[str], Awaitable[list[str]]]
+
 
 @dataclass(frozen=True)
 class Page:
@@ -31,6 +34,11 @@ class Fetcher(Protocol):
     async def fetch(self, result: SearchResult) -> Page | None: ...
 
 
+async def resolve_host(host: str) -> list[str]:
+    infos = await asyncio.get_running_loop().getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    return [str(info[4][0]) for info in infos]
+
+
 class PageFetcher:
     """Downloads a page with a hard time and size limit and keeps only the main text."""
 
@@ -41,11 +49,13 @@ class PageFetcher:
         timeout: float,
         max_bytes: int,
         max_chars: int,
+        resolve: Resolver = resolve_host,
     ) -> None:
         self._client = client
         self._timeout = timeout
         self._max_bytes = max_bytes
         self._max_chars = max_chars
+        self._resolve = resolve
 
     async def fetch(self, result: SearchResult) -> Page | None:
         try:
@@ -71,7 +81,7 @@ class PageFetcher:
     async def _download(self, url: str) -> tuple[bytes | None, str, str | None]:
         # Redirects are followed by hand so every hop gets the same address check.
         for _ in range(MAX_REDIRECTS + 1):
-            if not is_public_http_url(url):
+            if not await self._is_public(url):
                 log.info("not fetching %s: not a public address", url)
                 return None, "", None
             async with self._client.stream("GET", url, follow_redirects=False) as response:
@@ -91,6 +101,19 @@ class PageFetcher:
                 return bytes(body[: self._max_bytes]), content_type, response.encoding
         log.info("not fetching %s: more than %d redirects", url, MAX_REDIRECTS)
         return None, "", None
+
+    async def _is_public(self, url: str) -> bool:
+        """Also resolve the host, so a public-looking name that points inside is rejected.
+
+        httpx looks the name up again when it connects, so this doesn't stop DNS rebinding.
+        """
+        if not is_public_http_url(url):
+            return False
+        try:
+            addresses = await self._resolve(urlsplit(url).hostname or "")
+        except OSError:
+            return False
+        return bool(addresses) and all(ipaddress.ip_address(a).is_global for a in addresses)
 
 
 def extract_main_text(html: str, url: str) -> tuple[str, str]:

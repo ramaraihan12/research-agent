@@ -1,9 +1,17 @@
 import asyncio
+import ipaddress
 
 import httpx
 import pytest
 
-from research_agent.fetch import MAX_REDIRECTS, Page, PageFetcher, is_public_http_url, read_pages
+from research_agent.fetch import (
+    MAX_REDIRECTS,
+    Page,
+    PageFetcher,
+    is_public_http_url,
+    read_pages,
+    resolve_host,
+)
 from research_agent.search import SearchResult
 
 ARTICLE = """
@@ -21,11 +29,15 @@ ARTICLE = """
 )
 
 
+async def public_dns(host: str) -> list[str]:
+    return ["93.184.215.14"]
+
+
 def make_fetcher(handler, **overrides) -> PageFetcher:
     # follow_redirects=True on purpose: the fetcher has to check each hop itself anyway.
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=True)
-    options = {"timeout": 2.0, "max_bytes": 100_000, "max_chars": 5_000} | overrides
-    return PageFetcher(client, **options)
+    options = {"timeout": 2.0, "max_bytes": 100_000, "max_chars": 5_000, "resolve": public_dns}
+    return PageFetcher(client, **(options | overrides))
 
 
 def result(url: str, title: str = "") -> SearchResult:
@@ -144,6 +156,37 @@ async def test_gives_up_after_too_many_redirects():
 
     assert await fetcher.fetch(result("https://example.com/loop")) is None
     assert len(requested) == MAX_REDIRECTS + 1
+
+
+async def test_skips_names_that_resolve_to_internal_addresses():
+    async def internal_dns(host: str) -> list[str]:
+        return ["93.184.215.14", "10.0.0.5"] if host == "sneaky.example.com" else ["93.184.215.14"]
+
+    def handler(request):
+        if request.url.host == "sneaky.example.com":
+            raise AssertionError(f"should not fetch {request.url}")
+        return httpx.Response(302, headers={"location": "http://sneaky.example.com/"})
+
+    fetcher = make_fetcher(handler, resolve=internal_dns)
+
+    assert await fetcher.fetch(result("http://sneaky.example.com/")) is None
+    assert await fetcher.fetch(result("https://example.com/go")) is None
+
+
+async def test_skips_names_that_dont_resolve():
+    async def no_dns(host: str) -> list[str]:
+        raise OSError("name not known")
+
+    fetcher = make_fetcher(lambda request: httpx.Response(200, html=ARTICLE), resolve=no_dns)
+
+    assert await fetcher.fetch(result("https://example.com/tides")) is None
+
+
+async def test_resolve_host_uses_the_system_resolver():
+    addresses = await resolve_host("localhost")
+
+    assert addresses
+    assert all(ipaddress.ip_address(a).is_loopback for a in addresses)
 
 
 def test_public_url_check():
