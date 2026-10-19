@@ -10,9 +10,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Limits:
     """Hard caps that keep a run from going on forever."""
 
-    max_sub_questions: int = 4
+    max_sub_questions: int = 3
     max_rounds: int = 2
-    max_pages: int = 8
+    max_pages: int = 10
+    pages_per_question: int = 2
     token_budget: int = 60_000
     results_per_query: int = 5
 
@@ -33,6 +34,7 @@ class Settings(BaseSettings):
     max_sub_questions: int = Field(default=Limits.max_sub_questions, ge=1, le=10)
     max_rounds: int = Field(default=Limits.max_rounds, ge=1, le=5)
     max_pages: int = Field(default=Limits.max_pages, ge=1, le=40)
+    pages_per_question: int = Field(default=Limits.pages_per_question, ge=1, le=10)
     token_budget: int = Field(default=Limits.token_budget, ge=1_000)
     results_per_query: int = Field(default=Limits.results_per_query, ge=1, le=20)
 
@@ -52,6 +54,7 @@ class Settings(BaseSettings):
             max_sub_questions=self.max_sub_questions,
             max_rounds=self.max_rounds,
             max_pages=self.max_pages,
+            pages_per_question=self.pages_per_question,
             token_budget=self.token_budget,
             results_per_query=self.results_per_query,
         )
