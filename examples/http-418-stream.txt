@@ -1,0 +1,42 @@
+$ curl -N -X POST localhost:8102/runs -H 'content-type: application/json' \
+    -d '{"question": "What does HTTP status code 418 mean, and which RFC defines it?"}'
+
+event: run
+data: {"thread_id": "55759158a2ef4178a04114024cfc925d"}
+
+: ping
+
+event: progress
+data: {"node": "plan", "plan": ["What is the definition and meaning of HTTP status code 418?", "Which RFC specifies HTTP status code 418?"], "message": "drafted a plan with 2 sub-questions"}
+
+event: plan
+data: {"question": "What does HTTP status code 418 mean, and which RFC defines it?", "plan": ["What is the definition and meaning of HTTP status code 418?", "Which RFC specifies HTTP status code 418?"], "thread_id": "55759158a2ef4178a04114024cfc925d"}
+
+$ curl -N -X POST localhost:8102/runs/55759158a2ef4178a04114024cfc925d/plan -H 'content-type: application/json' \
+    -d '{"approved": true, "plan": ["What does HTTP status code 418 I am a teapot mean?", "Which RFC defines HTTP 418, and is it part of the official HTTP standard?"]}'
+
+event: progress
+data: {"node": "review_plan", "plan": ["What does HTTP status code 418 I am a teapot mean?", "Which RFC defines HTTP 418, and is it part of the official HTTP standard?"], "message": "plan approved (2 sub-questions)"}
+
+: ping
+
+: ping
+
+: ping
+
+event: progress
+data: {"node": "research", "sub_question": "What does HTTP status code 418 I am a teapot mean?", "pages_read": 2, "notes": 2, "message": "searched \"What does HTTP status code 418 I am a teapot mean?\": read 2 pages, kept 2 notes"}
+
+event: progress
+data: {"node": "research", "sub_question": "Which RFC defines HTTP 418, and is it part of the official HTTP standard?", "pages_read": 2, "notes": 2, "message": "searched \"Which RFC defines HTTP 418, and is it part of the official HTTP standard?\": read 2 pages, kept 2 notes"}
+
+event: progress
+data: {"node": "reflect", "round": 1, "follow_up": [], "stop_reason": "notes cover the question", "message": "round 1 done, stopping: notes cover the question"}
+
+: ping
+
+event: progress
+data: {"node": "write", "message": "wrote the report"}
+
+event: done
+data: {"thread_id": "55759158a2ef4178a04114024cfc925d", "status": "done", "question": "What does HTTP status code 418 mean, and which RFC defines it?", "plan": ["What does HTTP status code 418 I am a teapot mean?", "Which RFC defines HTTP 418, and is it part of the official HTTP standard?"], "rounds": 1, "pages_read": 4, "tokens_used": 7096, "stop_reason": "notes cover the question", "report": "# What does HTTP status code 418 mean, and which RFC defines it?\n\nHTTP status code 418, known as \"I'm a teapot,\" indicates that a server refuses to brew coffee because it is permanently a teapot [1][2]. This code was originally defined in RFC 2324, published on April 1, 1998, as an April Fools' Day RFC [1][2]. Although RFC 9110 later marked the code as unused, public outcry led to it being reserved instead [1][2].\n\n*   **Original Definition**: The code stems from the Hyper Text Coffee Pot Control Protocol (HTCPCP), a satirical protocol where a teapot returns 418 when requested to brew coffee [1][2].\n*   **Extensions**: RFC 7168, also an April Fools' RFC from 2014, extended HTCPCP to support brewing teas [1].\n*   **Usage**: While intended as a joke, some websites now use 418 for requests they do not wish to handle, such as automated queries [2].\n*   **Distinction**: If a combined coffee/tea pot is temporarily out of coffee, it should return status 503 rather than 418 [2].\n\nThe sources do not settle on a single definitive reason for the code's survival, as they present conflicting narratives regarding whether its retention was purely due to the \"Save 418 Movement\" or if it was formally reserved to prevent non-joke semantics despite being marked unused.\n\n## Sources\n\n1. [Hyper Text Coffee Pot Control Protocol - Wikipedia](https://en.wikipedia.org/wiki/Hyper_Text_Coffee_Pot_Control_Protocol)\n2. [418 I'm a teapot - HTTP | MDN - MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/418)\n"}
