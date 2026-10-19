@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from research_agent.state import Note
 
-_CITATION = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
+_CITATION = re.compile(r"\[(\d{1,3}(?:\s*,\s*\d{1,3})*)\]")
 _LEADING_TITLE = re.compile(r"\A\s*#\s[^\n]*\n+")
 
 
