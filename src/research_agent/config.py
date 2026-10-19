@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     llm_provider: str = "ollama"
-    llm_model: str = "qwen3.5-9b:iq4xs"
+    llm_model: str = "qwen3.5:9b"
     llm_api_key: SecretStr | None = None
     llm_temperature: float = 0.2
     llm_max_output_tokens: int = Field(default=1500, ge=64)
