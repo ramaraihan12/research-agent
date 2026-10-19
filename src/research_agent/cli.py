@@ -116,7 +116,10 @@ def review_plan(question: str, plan: list[str], yes: bool, thread_id: str) -> di
             case _:
                 return {"approved": True}
     except typer.Abort:
-        say(f"\nleft the plan waiting. pick it up with: research-agent resume {thread_id}")
+        if get_settings().database_url:
+            say(f"\nleft the plan waiting. pick it up with: research-agent resume {thread_id}")
+        else:
+            say("\nstopped. the run wasn't saved (set DATABASE_URL to pause and resume runs)")
         raise typer.Exit(130) from None
 
 

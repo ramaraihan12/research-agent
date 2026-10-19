@@ -4,6 +4,7 @@ import pytest
 from typer.testing import CliRunner
 
 from research_agent import cli
+from research_agent.config import Settings
 
 runner = CliRunner()
 
@@ -46,3 +47,23 @@ def test_rejecting_the_plan_in_the_terminal(harness):
     assert result.exit_code == 0, result.output
     assert "no report (plan rejected)" in result.stderr
     assert harness.search.queries == []
+
+
+@pytest.mark.parametrize(
+    ("database_url", "hint"),
+    [
+        (None, "the run wasn't saved"),
+        ("postgresql://localhost/research_agent", "research-agent resume "),
+    ],
+    ids=["in-memory", "postgres"],
+)
+def test_leaving_the_plan_prompt_only_offers_resume_when_saved(
+    harness, monkeypatch, database_url, hint
+):
+    settings = Settings(_env_file=None, database_url=database_url)
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+
+    result = runner.invoke(cli.app, ["ask", "How do tide pools work?"], input="")
+
+    assert result.exit_code == 130
+    assert hint in result.stderr
