@@ -104,7 +104,7 @@ The research runs inside the request that streams it, so if the client disconnec
 docker compose up --build
 ```
 
-That starts the API on port 8102 with its own Postgres. Ollama stays on the host and the container reaches it through `host.docker.internal`.
+That starts the API on `127.0.0.1:8102` with its own Postgres. It's only published on localhost because the API has no auth, and anyone who can reach it can start runs on your model key. Ollama stays on the host and the container reaches it through `host.docker.internal`.
 
 ## Tests
 

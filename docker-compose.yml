@@ -3,7 +3,7 @@ services:
   api:
     build: .
     ports:
-      - "8102:8102"
+      - "127.0.0.1:8102:8102"
     env_file:
       - path: .env
         required: false
