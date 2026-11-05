@@ -2,6 +2,8 @@
 
 ![ci](https://github.com/ramaraihan12/research-agent/actions/workflows/ci.yml/badge.svg)
 
+**Live demo: https://research-agent-mauve-eight.vercel.app** (no login). It runs on Gemini and Tavily with tight caps and 10 runs a day shared by everyone, so it may ask you to come back tomorrow, but there's a finished report on the page either way. After a quiet spell the first request takes a few extra seconds while the function and the database wake up.
+
 Ask it a question, it drafts a short research plan, you approve or edit the plan, then it searches the web, reads a few pages, takes notes and writes a small Markdown report with numbered sources. Built with LangGraph and runs on a local Ollama model by default, so it costs nothing to try.
 
 ```text
@@ -56,6 +58,7 @@ Limits are hard caps, not suggestions: rounds, total pages, pages per sub-questi
 - DuckDuckGo via `ddgs` (Tavily if you set a key), httpx + trafilatura
 - Typer CLI, FastAPI with server-sent events
 - pytest, ruff, pyright, GitHub Actions, Docker
+- The public demo: Vercel's Python runtime, Neon Postgres, and one page of plain JavaScript
 
 ## Run it
 
@@ -106,13 +109,31 @@ docker compose up --build
 
 That starts the API on `127.0.0.1:8102` with its own Postgres. It's only published on localhost because the API has no auth, and anyone who can reach it can start runs on your model key. Ollama stays on the host and the container reaches it through `host.docker.internal`. On Linux, Ollama only listens on 127.0.0.1 by default, which the container can't reach, so start it with `OLLAMA_HOST=0.0.0.0 ollama serve` first.
 
+## The public demo
+
+The API above has no auth, so it isn't what's deployed. `research_agent.demo` is a separate small app around the same graph, `app.py` is its entry point on Vercel, and `public/` is the page. None of the routes above exist there.
+
+- **Time limit.** A Vercel function stops at 300 seconds and a run can take longer. So a request drives the graph for at most `DEMO_SLICE_SECONDS` (240), then ends with a `paused` event. Everything that finished is already checkpointed in Postgres, so the page sends another request and the run carries on, on whichever instance gets it. A run normally takes about 15 seconds and never needs this, but it's what stops a slow model from losing the run. Each step has to fit inside one slice, which is why model calls and searches have their own timeouts.
+- **Who sees what.** Run ids are 256 random bits, and a run belongs to the visitor cookie that started it (`HttpOnly`, `SameSite=Strict`, stored hashed). Anyone else gets the same 404 as for a run that doesn't exist, and nothing lists runs.
+- **Limits.** Starting a run is limited per address and per day for everyone. The counters live in Postgres because serverless instances share no memory, and an address over its limit can't use up the shared cap. Questions and plans have size caps, and only one request can drive a run at a time, through a lease that runs out if the instance dies.
+- **Cost.** With `MAX_SUB_QUESTIONS=2`, `MAX_ROUNDS=1` and `MAX_PAGES=4`, a run costs 2 Tavily credits and 6 Gemini calls: one plan, one note per page, one report. Each one is counted before it happens and a run stops at its budget. A search is paid for once per run, so a retry or a resumed run doesn't buy it again. At 10 runs a day the worst case stays under Tavily's 1,000 free credits a month.
+- **Fetching.** The fetcher runs on a public host and reads pages it didn't choose, so it only connects to public addresses. The address it checks is the one it connects to, which covers redirects and DNS rebinding as well.
+
+To run your own, create a Vercel project and a Postgres database, set the variables from [.env.example](.env.example), then:
+
+```bash
+uv sync --extra gemini --extra tavily
+DATABASE_URL=postgresql://... uv run research-agent setup-demo    # once, creates the tables
+vercel deploy --prod
+```
+
 ## Tests
 
 ```bash
 uv run pytest
 ```
 
-The graph tests use a scripted fake chat model and a stubbed search and fetcher, so they run offline: routing, the interrupt and resume flow, plan edits and rejection, every limit, retries, the API stream and the CLI prompts. One test checks that a paused run survives a restart on real Postgres; it only runs when `DATABASE_URL` is set in the environment:
+The graph tests use a scripted fake chat model and a stubbed search and fetcher, so they run offline: routing, the interrupt and resume flow, plan edits and rejection, every limit, retries, the API stream and the CLI prompts. The tests for the public demo and one that checks a paused run survives a restart need real Postgres, because what they prove is that limits and leases hold with no shared memory. They only run when `DATABASE_URL` is set in the environment:
 
 ```bash
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/research_agent uv run pytest -m postgres
@@ -126,6 +147,6 @@ Lint and types: `uv run ruff check . && uv run ruff format --check . && uv run p
 - Parallel branches don't know about each other within a round, so two sub-questions can read the same page. In the 418 run both branches ended up on Wikipedia and MDN. Later rounds do skip what was already read.
 - The token budget is checked between model calls, so a run can go over by about one call.
 - DuckDuckGo through `ddgs` is free but flaky. Rate limits and network errors come back as an empty result for that sub-question (you can see one in the run above) instead of failing the run. Tavily is steadier if you have a key.
-- I've only run it for real against Ollama. The OpenAI, Gemini and Anthropic paths go through the same `init_chat_model` call but I haven't tested them with live keys.
+- I've run it for real against Ollama and, for the demo, Gemini. The OpenAI and Anthropic paths go through the same `init_chat_model` call but I haven't tested them with live keys.
 
-What I'd add next: share read URLs between parallel branches, and a small web page for reviewing the plan instead of curl.
+What I'd add next: share read URLs between parallel branches.
