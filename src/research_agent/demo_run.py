@@ -46,6 +46,10 @@ class ModelMeter(AsyncCallbackHandler):
         if not await self._guard.spend_model_call(self._run_id, self._cap):
             raise RunBudgetExceeded(f"run used all {self._cap} model calls")
 
+    async def on_llm_error(self, error: BaseException, **kwargs: Any) -> None:
+        # LangGraph retries these quietly, and on a shared free key they're worth seeing.
+        log.warning("model call failed: %s: %.300s", type(error).__name__, error)
+
 
 class MeteredSearch:
     """Pays for each query once per run, however many times a retry or a resume repeats it."""

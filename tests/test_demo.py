@@ -570,6 +570,26 @@ async def test_a_failed_step_tells_the_visitor_nothing_internal_and_can_continue
         assert (await resume(me, run["run_id"]))[-1][0] == "done"
 
 
+async def test_failed_model_calls_are_counted_and_logged_for_the_operator(database, world, caplog):
+    failures = iter([True])
+
+    def flaky(_: str) -> str:
+        if next(failures, False):
+            raise ConnectionError("503 the model is overloaded")
+        return "- tide pools hold water at low tide"
+
+    world.replies["notes"] = flaky
+    app = create_app(demo_settings())
+    async with browser(app) as me:
+        run = await start(me)
+        done = (await approve(me, run["run_id"]))[-1][1]
+
+    assert "model call failed: ConnectionError: 503 the model is overloaded" in caplog.text
+    assert done["status"] == "done"
+    assert done["cost"]["model_calls"] == world.real_model_calls
+    assert world.real_model_calls > 6, "the retry costs real calls, so it has to show up"
+
+
 async def test_the_quota_check_doesnt_need_the_graph(app):
     async with browser(app) as me:
         response = await me.get("/api/limits")
