@@ -52,7 +52,9 @@ class Settings(BaseSettings):
     demo_runs_per_ip_day: int = Field(default=3, ge=1)
     demo_requests_per_ip_minute: int = Field(default=30, ge=1)
     demo_max_search_credits: int = Field(default=3, ge=1)
-    demo_max_model_calls: int = Field(default=12, ge=1)
+    # Three tries at everything a run does: 3 for the plan, 12 for notes, 3 for the report.
+    demo_max_model_calls: int = Field(default=18, ge=1)
+    demo_retry_seconds: float = Field(default=20.0, gt=0)
     demo_slice_seconds: float = Field(default=240.0, gt=0)
     demo_max_slices: int = Field(default=5, ge=1)
 

@@ -2,6 +2,7 @@ import asyncio
 import os
 import threading
 import time
+from collections import Counter
 
 import httpx
 import psycopg
@@ -12,7 +13,7 @@ from research_agent.config import Settings
 from research_agent.db import open_pool
 from research_agent.demo import client_bucket, create_app, owner_key
 from research_agent.guard import Guard
-from tests.fakes import ScriptedChatModel, StubFetcher, StubSearch
+from tests.fakes import ScriptedChatModel, StubFetcher, StubSearch, sub_question_of
 from tests.test_api import parse_sse
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -29,6 +30,7 @@ def demo_settings(**overrides) -> Settings:
         "max_rounds": 1,
         "max_pages": 4,
         "pages_per_question": 2,
+        "demo_retry_seconds": 0.01,
     }
     return Settings(_env_file=None, **(values | overrides))
 
@@ -588,6 +590,63 @@ async def test_failed_model_calls_are_counted_and_logged_for_the_operator(databa
     assert done["status"] == "done"
     assert done["cost"]["model_calls"] == world.real_model_calls
     assert world.real_model_calls > 6, "the retry costs real calls, so it has to show up"
+
+
+async def test_retries_wait_out_a_per_minute_quota(guard, world, monkeypatch):
+    # Gemini's free tier is 15 calls a minute for everything on the key, so a retry has to
+    # outlast the rest of a minute. The defaults are what this checks, not the test settings.
+    seen = {}
+    build_graph = demo_run.build_graph
+
+    def capture(deps, checkpointer, retry):
+        seen["retry"] = retry
+        return build_graph(deps, checkpointer, retry)
+
+    monkeypatch.setattr(demo_run, "build_graph", capture)
+
+    await guard.create_run("run", "owner")
+    async with demo_run.open_session(Settings(_env_file=None), guard, "run", "owner"):
+        pass
+
+    retry = seen["retry"]
+    assert retry.max_attempts == 3
+    assert retry.initial_interval * (1 + retry.backoff_factor) >= 60
+
+
+async def test_the_budget_covers_every_step_needing_all_its_attempts(database, world):
+    calls: Counter[str] = Counter()
+
+    def fails_twice_then(reply: str):
+        def answer(user: str) -> str:
+            step = "notes" if "Sub-question: " in user else reply
+            calls[step] += 1
+            if calls[step] <= 2:
+                raise ConnectionError("429 quota")
+            return reply
+
+        return answer
+
+    def second_page_fails_twice(user: str) -> str:
+        # Each branch reads its first page, then fails on the second, so a retry repeats both.
+        branch = sub_question_of(user)
+        calls[branch] += 1
+        if calls[branch] in (2, 4):
+            raise ConnectionError("429 quota")
+        return "- tide pools hold water at low tide"
+
+    world.replies.update(
+        plan=fails_twice_then('{"sub_questions": ["one", "two"]}'),
+        notes=second_page_fails_twice,
+        write=fails_twice_then("Tide pools are rocky hollows [1]."),
+    )
+    app = create_app(demo_settings(demo_max_model_calls=Settings().demo_max_model_calls))
+    async with browser(app) as me:
+        run = await start(me)
+        name, done = (await approve(me, run["run_id"]))[-1]
+
+    assert name == "done", done
+    assert "## Sources" in done["report"]
+    assert done["cost"]["model_calls"] == world.real_model_calls == 18
 
 
 async def test_the_quota_check_doesnt_need_the_graph(app):

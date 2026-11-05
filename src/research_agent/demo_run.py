@@ -13,7 +13,7 @@ from typing import Any
 from fastapi.sse import ServerSentEvent
 from langchain_core.callbacks import AsyncCallbackHandler
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from langgraph.types import Command
+from langgraph.types import Command, RetryPolicy
 
 from research_agent.config import Settings
 from research_agent.db import open_pool
@@ -28,7 +28,7 @@ from research_agent.state import PlanReview
 log = logging.getLogger(__name__)
 
 KEEP_RUNS_DAYS = 7
-FAILED = "A service this run depends on failed. You can try continuing the run."
+FAILED = "A service this run needs is busy or down. Wait a minute, then continue the run."
 OUT_OF_BUDGET = "This run reached its limit for the demo, so it stopped here."
 
 
@@ -157,7 +157,10 @@ async def open_session(
             limits=settings.limits,
         )
         # The tables already exist: `setup_database` runs once, not on every request.
-        graph = build_graph(deps, AsyncPostgresSaver(guard.pool))
+        # Gemini's free tier counts calls per minute across the whole key, so a retry has to
+        # outlast the rest of that minute: 20 seconds, then 40.
+        retry = RetryPolicy(max_attempts=3, initial_interval=settings.demo_retry_seconds)
+        graph = build_graph(deps, AsyncPostgresSaver(guard.pool), retry)
         yield RunSession(run_id, owner, graph, guard, settings)
 
 
