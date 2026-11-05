@@ -1,12 +1,14 @@
 import asyncio
+import contextlib
 import ipaddress
 import logging
 import socket
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol, cast
 from urllib.parse import urlsplit
 
+import httpcore
 import httpx
 import trafilatura
 from trafilatura.settings import Document
@@ -20,8 +22,15 @@ USER_AGENT = (
 )
 MIN_TEXT_CHARS = 200
 MAX_REDIRECTS = 5
+ALLOWED_PORTS = {None, 80, 443}
+INTERNAL_SUFFIXES = (".localhost", ".local", ".internal", ".intranet", ".lan", ".home.arpa")
+METADATA_HOSTS = {"metadata.goog"}
+# Azure's wire server has a public address but only answers from inside Azure.
+METADATA_ADDRESSES = {ipaddress.ip_address("168.63.129.16")}
+NAT64 = ipaddress.ip_network("64:ff9b::/96")
 
 type Resolver = Callable[[str], Awaitable[list[str]]]
+type Address = ipaddress.IPv4Address | ipaddress.IPv6Address
 
 
 @dataclass(frozen=True)
@@ -38,6 +47,54 @@ class Fetcher(Protocol):
 async def resolve_host(host: str) -> list[str]:
     infos = await asyncio.get_running_loop().getaddrinfo(host, None, type=socket.SOCK_STREAM)
     return [str(info[4][0]) for info in infos]
+
+
+class PublicOnlyBackend(httpcore.AsyncNetworkBackend):
+    """Opens sockets only to addresses it has just checked.
+
+    Checking a name and then letting httpx connect means two lookups, and a DNS server can
+    answer them differently. Here the address that was checked is the one connected to. TLS
+    still verifies the real hostname, because httpcore takes that from the URL.
+    """
+
+    def __init__(
+        self, resolve: Resolver = resolve_host, inner: httpcore.AsyncNetworkBackend | None = None
+    ) -> None:
+        self._resolve = resolve
+        self._inner = inner or cast(httpcore.AsyncNetworkBackend, httpcore.AnyIOBackend())
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,  # noqa: ASYNC109 - httpcore's signature
+        local_address: str | None = None,
+        socket_options: Iterable[Any] | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        try:
+            addresses = list(dict.fromkeys(await self._resolve(host)))
+        except OSError as exc:
+            raise httpcore.ConnectError(f"can't resolve {host}") from exc
+        if not addresses or not all(is_public_address(a) for a in addresses):
+            raise httpcore.ConnectError(f"{host} is not a public address")
+
+        async def connect(address: str) -> httpcore.AsyncNetworkStream:
+            return await self._inner.connect_tcp(
+                address,
+                port,
+                timeout=timeout,
+                local_address=local_address,
+                socket_options=socket_options,
+            )
+
+        *others, last = addresses
+        for address in others:
+            with contextlib.suppress(httpcore.ConnectError, httpcore.ConnectTimeout):
+                return await connect(address)
+        return await connect(last)
+
+    async def sleep(self, seconds: float) -> None:
+        await self._inner.sleep(seconds)
 
 
 class PageFetcher:
@@ -62,7 +119,7 @@ class PageFetcher:
         try:
             async with asyncio.timeout(self._timeout):
                 raw, content_type, encoding = await self._download(result.url)
-        except (httpx.HTTPError, TimeoutError) as exc:
+        except (httpx.HTTPError, httpx.InvalidURL, TimeoutError) as exc:
             log.info("skipping %s: %s", result.url, exc or type(exc).__name__)
             return None
         if raw is None:
@@ -104,9 +161,10 @@ class PageFetcher:
         return None, "", None
 
     async def _is_public(self, url: str) -> bool:
-        """Also resolve the host, so a public-looking name that points inside is rejected.
+        """Refuse early, before anything is sent.
 
-        httpx looks the name up again when it connects, so this doesn't stop DNS rebinding.
+        `PublicOnlyBackend` is what enforces this at connect time, so a name that changes its
+        answer after this check still can't get in.
         """
         if not is_public_http_url(url):
             return False
@@ -114,7 +172,7 @@ class PageFetcher:
             addresses = await self._resolve(urlsplit(url).hostname or "")
         except OSError:
             return False
-        return bool(addresses) and all(ipaddress.ip_address(a).is_global for a in addresses)
+        return bool(addresses) and all(is_public_address(a) for a in addresses)
 
 
 def extract_main_text(html: str, url: str) -> tuple[str, str]:
@@ -132,18 +190,48 @@ def extract_main_text(html: str, url: str) -> tuple[str, str]:
 
 
 def is_public_http_url(url: str) -> bool:
-    """Reject non-http schemes and obvious internal hosts before fetching."""
-    parts = urlsplit(url)
+    """Reject anything but plain web URLs on public-looking hosts, before resolving them."""
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return False
     if parts.scheme not in {"http", "https"} or not parts.hostname:
         return False
-    host = parts.hostname
-    if host == "localhost" or host.endswith(".local"):
+    if port not in ALLOWED_PORTS or parts.username or parts.password:
         return False
+    host = parts.hostname.rstrip(".")
     try:
-        address = ipaddress.ip_address(host)
+        ipaddress.ip_address(host)
     except ValueError:
-        return True
-    return address.is_global
+        # A single label is either a local service or an integer spelling of an address.
+        return "." in host and not host.endswith(INTERNAL_SUFFIXES) and host not in METADATA_HOSTS
+    return is_public_address(host)
+
+
+def is_public_address(address: str) -> bool:
+    """True for addresses on the public internet, looking inside IPv6 forms that wrap IPv4."""
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    return all(is_global(a) for a in [ip, *wrapped_ipv4(ip)])
+
+
+def is_global(ip: Address) -> bool:
+    # is_global alone lets multicast through.
+    return (
+        ip.is_global and not ip.is_multicast and not ip.is_reserved and ip not in METADATA_ADDRESSES
+    )
+
+
+def wrapped_ipv4(ip: Address) -> list[ipaddress.IPv4Address]:
+    if isinstance(ip, ipaddress.IPv4Address):
+        return []
+    wrapped = [ip.ipv4_mapped, ip.sixtofour, *(ip.teredo or ())]
+    if ip in NAT64:
+        wrapped.append(ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF))
+    return [a for a in wrapped if a is not None]
 
 
 async def read_pages(fetcher: Fetcher, results: Sequence[SearchResult], limit: int) -> list[Page]:
@@ -158,8 +246,15 @@ async def read_pages(fetcher: Fetcher, results: Sequence[SearchResult], limit: i
     return pages
 
 
-def make_http_client(timeout: float) -> httpx.AsyncClient:
+def make_http_client(timeout: float, resolve: Resolver = resolve_host) -> httpx.AsyncClient:
+    transport = httpx.AsyncHTTPTransport()
+    # httpx has no option for a network backend, so its pool is replaced with one that has it.
+    transport._pool = httpcore.AsyncConnectionPool(
+        ssl_context=httpx.create_ssl_context(),
+        network_backend=PublicOnlyBackend(resolve),
+    )
     return httpx.AsyncClient(
+        transport=transport,
         timeout=httpx.Timeout(timeout),
         headers={"User-Agent": USER_AGENT, "Accept": "text/html,text/plain;q=0.9"},
     )

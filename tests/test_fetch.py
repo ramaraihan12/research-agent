@@ -1,6 +1,7 @@
 import asyncio
 import ipaddress
 
+import httpcore
 import httpx
 import pytest
 
@@ -8,7 +9,10 @@ from research_agent.fetch import (
     MAX_REDIRECTS,
     Page,
     PageFetcher,
+    PublicOnlyBackend,
+    is_public_address,
     is_public_http_url,
+    make_http_client,
     read_pages,
     resolve_host,
 )
@@ -27,6 +31,9 @@ ARTICLE = """
 """.format(
     body="Tide pools form when the sea goes out and water stays behind in rock hollows. " * 8
 )
+
+
+RAW_RESPONSE = b"HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-length: 2\r\n\r\nhi"
 
 
 async def public_dns(host: str) -> list[str]:
@@ -194,6 +201,174 @@ def test_public_url_check():
     assert is_public_http_url("http://8.8.8.8/")
     assert not is_public_http_url("http://192.168.1.1/admin")
     assert not is_public_http_url("ftp://example.com/")
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://metadata.google.internal/computeMetadata/v1/",
+        "http://metadata.goog/",
+        "http://instance-data/latest/",
+        "http://service.internal/",
+        "http://localhost./",
+        "http://foo.localhost/",
+        "http://printer.local./",
+        "http://redis/",
+        "http://user:hunter2@example.com/",
+        "http://example.com:6379/",
+        "http://example.com:99999/",
+        "http://[::1/",
+    ],
+)
+def test_public_url_check_refuses_internal_names_and_odd_urls(url):
+    assert not is_public_http_url(url)
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        "127.0.0.1",
+        "10.0.0.5",
+        "172.16.0.1",
+        "192.168.1.1",
+        "169.254.169.254",  # AWS, GCP and Azure metadata
+        "169.254.170.2",  # ECS task credentials
+        "100.100.100.200",  # Alibaba metadata, inside CGNAT space
+        "168.63.129.16",  # Azure wire server, a public address on paper
+        "0.0.0.0",
+        "224.0.0.1",  # multicast passes ipaddress' is_global
+        "239.255.255.250",
+        "::1",
+        "::",
+        "fe80::1",
+        "fd00:ec2::254",  # AWS IPv6 metadata
+        "::ffff:169.254.169.254",  # IPv4-mapped
+        "64:ff9b::a9fe:a9fe",  # NAT64 wrapping 169.254.169.254, also passes is_global
+        "64:ff9b::7f00:1",
+        "2002:7f00:1::",  # 6to4 wrapping 127.0.0.1
+        "2001:0:4136:e378:8000:63bf:80ff:fffe",  # Teredo wrapping 127.0.0.1
+        "ff02::1",
+        "not an address",
+    ],
+)
+def test_refuses_addresses_that_are_not_public(address):
+    assert not is_public_address(address)
+
+
+@pytest.mark.parametrize("address", ["8.8.8.8", "93.184.215.14", "2606:4700:4700::1111"])
+def test_accepts_public_addresses(address):
+    assert is_public_address(address)
+
+
+async def test_a_bad_url_in_the_results_is_skipped_not_raised():
+    fetcher = make_fetcher(lambda request: httpx.Response(200, html=ARTICLE))
+
+    assert await fetcher.fetch(result("http://[::1/")) is None
+
+
+class RecordingBackend(httpcore.AsyncNetworkBackend):
+    def __init__(self, fail: set[str] | None = None) -> None:
+        self.hosts: list[str] = []
+        self.fail = fail or set()
+
+    async def connect_tcp(self, host, port, **_):
+        self.hosts.append(host)
+        if host in self.fail:
+            raise httpcore.ConnectError(f"{host} unreachable")
+        return httpcore.AsyncMockStream([])
+
+
+async def test_connects_to_the_address_it_checked_not_the_name():
+    inner = RecordingBackend()
+    backend = PublicOnlyBackend(public_dns, inner=inner)
+
+    await backend.connect_tcp("example.com", 443)
+
+    assert inner.hosts == ["93.184.215.14"]
+
+
+async def test_tries_the_next_checked_address_when_one_is_unreachable():
+    async def two_addresses(host: str) -> list[str]:
+        return ["2606:4700:4700::1111", "93.184.215.14"]
+
+    inner = RecordingBackend(fail={"2606:4700:4700::1111"})
+    backend = PublicOnlyBackend(two_addresses, inner=inner)
+
+    await backend.connect_tcp("example.com", 443)
+
+    assert inner.hosts == ["2606:4700:4700::1111", "93.184.215.14"]
+
+
+async def test_refuses_at_connect_time_if_any_address_is_internal():
+    async def mixed(host: str) -> list[str]:
+        return ["93.184.215.14", "10.0.0.5"]
+
+    inner = RecordingBackend()
+    backend = PublicOnlyBackend(mixed, inner=inner)
+
+    with pytest.raises(httpcore.ConnectError):
+        await backend.connect_tcp("example.com", 443)
+    assert inner.hosts == []
+
+
+async def test_a_name_that_stops_resolving_is_a_connect_error():
+    async def no_dns(host: str) -> list[str]:
+        raise OSError("name not known")
+
+    with pytest.raises(httpcore.ConnectError):
+        await PublicOnlyBackend(no_dns, inner=RecordingBackend()).connect_tcp("example.com", 443)
+
+
+async def test_dns_rebinding_never_reaches_the_internal_address():
+    """The name looks public when it's checked and points at loopback when it's connected to.
+
+    Uses a real listening socket and the real client, so a bypass would show up as a connection.
+    """
+    connections: list[object] = []
+
+    async def on_connect(reader, writer):
+        connections.append(writer)
+        writer.write(RAW_RESPONSE)
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(on_connect, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    answers = iter([["93.184.215.14"], ["127.0.0.1"]])
+
+    async def rebinding_dns(host: str) -> list[str]:
+        return next(answers)
+
+    # First answer: what a check before fetching would have seen.
+    assert all(is_public_address(a) for a in await rebinding_dns("rebind.example.com"))
+
+    async with server, make_http_client(1.0, resolve=rebinding_dns) as client:
+        with pytest.raises(httpx.ConnectError):
+            await client.get(f"http://rebind.example.com:{port}/")
+
+    assert connections == []
+
+
+async def test_the_real_client_still_connects_through_the_guard(monkeypatch):
+    # Without this the rebinding test above would also pass if nothing could connect at all.
+    monkeypatch.setattr("research_agent.fetch.is_public_address", lambda _: True)
+
+    async def on_connect(reader, writer):
+        await reader.readuntil(b"\r\n\r\n")
+        writer.write(RAW_RESPONSE)
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(on_connect, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+
+    async def loopback_dns(host: str) -> list[str]:
+        return ["127.0.0.1"]
+
+    async with server, make_http_client(1.0, resolve=loopback_dns) as client:
+        response = await client.get(f"http://anything.example.com:{port}/")
+
+    assert response.text == "hi"
 
 
 class ListFetcher:
