@@ -1,6 +1,8 @@
 """Turns raw graph updates into progress events that the CLI and the API both use."""
 
-from collections.abc import AsyncIterator
+import asyncio
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import aclosing
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -19,7 +21,7 @@ type RunInput = ResearchState | Command | None
 
 @dataclass(frozen=True)
 class Event:
-    type: Literal["progress", "plan", "done"]
+    type: Literal["progress", "plan", "done", "paused"]
     data: dict[str, Any] = field(default_factory=dict)
     message: str = ""
 
@@ -40,10 +42,14 @@ def thread_config(thread_id: str) -> RunnableConfig:
     return {"configurable": {"thread_id": thread_id}}
 
 
-async def stream_run(graph: Graph, payload: RunInput, thread_id: str) -> AsyncIterator[Event]:
+async def stream_run(
+    graph: Graph, payload: RunInput, thread_id: str
+) -> AsyncGenerator[Event, None]:
     """Run until the graph pauses for a plan review or finishes."""
     config = thread_config(thread_id)
-    async for chunk in graph.astream(payload, config, stream_mode="updates"):
+    # "sync" saves each step before starting the next, so a request that gets killed or cut
+    # off can only lose the step it was on.
+    async for chunk in graph.astream(payload, config, stream_mode="updates", durability="sync"):
         for node, update in chunk.items():
             if node == "__interrupt__":
                 yield Event("plan", dict(update[0].value) | {"thread_id": thread_id})
@@ -53,6 +59,33 @@ async def stream_run(graph: Graph, payload: RunInput, thread_id: str) -> AsyncIt
     status = await get_status(graph, thread_id)
     if status is not None and status.status == "done":
         yield Event("done", status.model_dump())
+
+
+async def stream_slice(
+    graph: Graph, payload: RunInput, thread_id: str, seconds: float
+) -> AsyncIterator[Event]:
+    """Like `stream_run`, but stops after `seconds` and leaves the run ready to continue.
+
+    A serverless request has a hard time limit and a run can take longer than that. Steps
+    that finished are already saved and whatever was in flight is cancelled, so passing
+    None in a later request picks up from there. It ends with a `paused` event.
+    """
+    deadline = asyncio.get_running_loop().time() + seconds
+    async with aclosing(stream_run(graph, payload, thread_id)) as events:
+        while True:
+            limit = asyncio.timeout_at(deadline)
+            try:
+                async with limit:
+                    event = await anext(events)
+            except StopAsyncIteration:
+                return
+            except TimeoutError:
+                # A node can time out too, and that one is a real failure.
+                if not limit.expired():
+                    raise
+                yield Event("paused", {"thread_id": thread_id}, "ran out of time, continuing")
+                return
+            yield event
 
 
 async def get_status(graph: Graph, thread_id: str) -> RunStatus | None:
