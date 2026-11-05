@@ -8,11 +8,9 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
-from psycopg import AsyncConnection
-from psycopg.rows import DictRow, dict_row
-from psycopg_pool import AsyncConnectionPool
 
 from research_agent.config import Settings
+from research_agent.db import open_pool
 from research_agent.fetch import PageFetcher, make_http_client
 from research_agent.graph import Deps, build_graph
 from research_agent.llm import build_chat_model
@@ -33,13 +31,7 @@ async def open_checkpointer(database_url: str | None) -> AsyncIterator[BaseCheck
     if not database_url:
         yield InMemorySaver()
         return
-    async with AsyncConnectionPool[AsyncConnection[DictRow]](
-        database_url,
-        min_size=1,
-        max_size=5,
-        open=False,
-        kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
-    ) as pool:
+    async with open_pool(database_url) as pool:
         saver = AsyncPostgresSaver(pool)
         await saver.setup()
         yield saver

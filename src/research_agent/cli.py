@@ -52,6 +52,19 @@ def serve(host: str = "127.0.0.1", port: int = 8102) -> None:
     run_async(server.serve())
 
 
+@app.command("setup-demo")
+def setup_demo() -> None:
+    """Create the tables the public demo needs (needs DATABASE_URL)."""
+    from research_agent.demo_run import setup_database
+
+    database_url = get_settings().database_url
+    if not database_url:
+        say("set DATABASE_URL first")
+        raise typer.Exit(1)
+    run_async(setup_database(database_url))
+    say("the demo's tables are ready")
+
+
 async def _resume(thread_id: str, yes: bool, out: Path | None) -> None:
     async with open_graph(get_settings()) as graph:
         status = await get_status(graph, thread_id)
