@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>research-agent</title>
+  <meta name="description" content="Ask a question, approve the research plan, and read a short report where every claim has a numbered source.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232e2a7a'/%3E%3Ctext x='16' y='23' font-family='monospace' font-size='20' font-weight='700' text-anchor='middle' fill='%23f4ee6b'%3E[1]%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&display=swap">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="top">
+    <span class="mark">research-agent</span>
+    <a href="https://github.com/ramaraihan12/research-agent">Source on GitHub</a>
+  </header>
+
+  <main>
+    <section class="intro">
+      <h1>Ask a question. Approve the plan. Check the sources.</h1>
+      <p class="lede">This agent drafts a short research plan and waits for your approval. Then it searches the web, reads a few pages and writes a report where every claim carries a numbered source.</p>
+    </section>
+
+    <form id="ask" class="ask">
+      <label for="question">Your question</label>
+      <textarea id="question" name="question" rows="2" minlength="3" maxlength="300" required
+        placeholder="Which TCP port does PostgreSQL listen on by default, and how do you change it?"></textarea>
+      <div class="ask-foot">
+        <button id="draft" type="submit">Draft a plan</button>
+        <p id="quota" class="quiet" aria-live="polite"></p>
+      </div>
+    </form>
+
+    <p id="notice" class="notice" role="status" hidden></p>
+
+    <section id="plan" class="sheet" aria-labelledby="plan-title" hidden>
+      <h2 id="plan-title">Review the plan</h2>
+      <p class="quiet">Nothing is searched until you approve. Edit a line to change what gets looked up.</p>
+      <ol id="plan-items" class="plan-items"></ol>
+      <div class="actions">
+        <button id="approve" type="button">Approve plan</button>
+        <button id="reject" type="button" class="plain">Reject plan</button>
+      </div>
+    </section>
+
+    <section id="progress" class="log" aria-labelledby="progress-title" hidden>
+      <h2 id="progress-title">Progress</h2>
+      <ol id="progress-items" aria-live="polite"></ol>
+      <div id="continue" class="actions" hidden>
+        <button id="continue-run" type="button">Continue run</button>
+      </div>
+    </section>
+
+    <section id="result" aria-label="Your report" hidden>
+      <article id="result-report" class="report"></article>
+      <p id="result-cost" class="quiet cost"></p>
+      <button id="again" type="button" class="plain">Ask another question</button>
+    </section>
+
+    <section class="example" aria-labelledby="example-title">
+      <h2 id="example-title">A finished report</h2>
+      <p class="quiet">From a real run on my laptop with a local 9B model. Point at a source to mark the claims that rest on it, or tap one on a phone.</p>
+      <article id="example-report" class="report">
+        <noscript><p><a href="https://github.com/ramaraihan12/research-agent/blob/main/examples/postgres-port.md">Read this report on GitHub.</a> The live demo needs JavaScript.</p></noscript>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

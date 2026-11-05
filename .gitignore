@@ -18,6 +18,7 @@ htmlcov/
 .env.*
 !.env.example
 reports/
+.vercel/
 data/
 
 # editors / assistants
