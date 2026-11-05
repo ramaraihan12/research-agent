@@ -12,8 +12,10 @@ from research_agent.config import Settings
 _THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
-def build_chat_model(settings: Settings) -> BaseChatModel:
+def build_chat_model(settings: Settings, callbacks: list[Any] | None = None) -> BaseChatModel:
     kwargs: dict[str, Any] = {"temperature": settings.llm_temperature}
+    if callbacks:
+        kwargs["callbacks"] = callbacks
     if settings.llm_provider == "ollama":
         kwargs["base_url"] = settings.ollama_base_url
         kwargs["num_predict"] = settings.llm_max_output_tokens
@@ -22,6 +24,10 @@ def build_chat_model(settings: Settings) -> BaseChatModel:
         kwargs["reasoning"] = False
     else:
         kwargs["max_tokens"] = settings.llm_max_output_tokens
+        if settings.llm_timeout:
+            kwargs["timeout"] = settings.llm_timeout
+        if settings.llm_max_retries:
+            kwargs["max_retries"] = settings.llm_max_retries
         if settings.llm_api_key:
             kwargs["api_key"] = settings.llm_api_key.get_secret_value()
     return init_chat_model(settings.llm_model, model_provider=settings.llm_provider, **kwargs)

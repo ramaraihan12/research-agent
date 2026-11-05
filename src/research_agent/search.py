@@ -49,10 +49,11 @@ class DuckDuckGoSearch:
 class TavilySearch:
     """Optional, used when TAVILY_API_KEY is set (pip extra `tavily`)."""
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, timeout: float = 15.0) -> None:
         from tavily import AsyncTavilyClient, errors  # pyright: ignore[reportMissingImports]
 
         self._client = AsyncTavilyClient(api_key=api_key)
+        self._timeout = timeout
         # Bad keys and forbidden requests are left to raise: those need fixing, not skipping.
         self._soft_errors = (
             errors.BadRequestError,
@@ -63,7 +64,10 @@ class TavilySearch:
 
     async def search(self, query: str, max_results: int) -> list[SearchResult]:
         try:
-            data = await self._client.search(query, max_results=max_results)
+            # "basic" is the 1 credit search, "advanced" costs 2.
+            data = await self._client.search(
+                query, max_results=max_results, search_depth="basic", timeout=self._timeout
+            )
         except self._soft_errors as exc:
             log.warning("tavily search failed for %r: %s", query, exc)
             return []
@@ -78,5 +82,5 @@ class TavilySearch:
 
 def make_search(settings: Settings) -> SearchClient:
     if settings.tavily_api_key:
-        return TavilySearch(settings.tavily_api_key.get_secret_value())
+        return TavilySearch(settings.tavily_api_key.get_secret_value(), settings.search_timeout)
     return DuckDuckGoSearch()
