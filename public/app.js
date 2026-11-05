@@ -3,7 +3,11 @@
 const RUN_KEY = "research-agent-run";
 // How many times the page will start another request for one run before asking the visitor.
 const MAX_REQUESTS = 8;
-const BUSY_WAIT_MS = 4000;
+// A request keeps going on the server after its tab closes, so a page that comes back has to
+// wait for it. It finishes or its 300 second lease runs out, so waiting that long always ends.
+const BUSY_LIMIT_MS = 310000;
+const BUSY_FIRST_WAIT_MS = 3000;
+const BUSY_LONGEST_WAIT_MS = 20000;
 
 const $ = (id) => document.getElementById(id);
 let runId = null;
@@ -357,7 +361,10 @@ async function drive(firstUrl, firstBody) {
 
   let url = firstUrl;
   let body = firstBody;
-  for (let request = 0; request < MAX_REQUESTS; request += 1) {
+  let requests = 0;
+  let busyWait = BUSY_FIRST_WAIT_MS;
+  let busyFor = 0;
+  while (requests < MAX_REQUESTS) {
     let ending;
     try {
       const response = await fetch(url, {
@@ -366,9 +373,11 @@ async function drive(firstUrl, firstBody) {
         body: body ? JSON.stringify(body) : undefined,
       });
       if (response.status === 409) {
-        // Another request still holds the run. It either finishes or its lease runs out.
-        await wait(BUSY_WAIT_MS);
-        ending = "dropped";
+        if (busyFor >= BUSY_LIMIT_MS) break;
+        await wait(busyWait);
+        busyFor += busyWait;
+        busyWait = Math.min(busyWait * 1.5, BUSY_LONGEST_WAIT_MS);
+        ending = "busy";
       } else if (response.status === 429) {
         showRefusal((await response.json()).detail);
         working(false);
@@ -388,7 +397,8 @@ async function drive(firstUrl, firstBody) {
     }
 
     if (ending === "done" || ending === "failed") return;
-    if (ending === "dropped") {
+    if (ending !== "busy") requests += 1;
+    if (ending !== "paused") {
       const run = await fetchRun();
       if (!run) return;
       if (run.status === "done") {
