@@ -12,6 +12,7 @@ const BUSY_LONGEST_WAIT_MS = 20000;
 const $ = (id) => document.getElementById(id);
 let runId = null;
 let draftedPlan = [];
+let regionBlocked = false;
 
 // Reports hold text from models and web pages, so nothing here goes through innerHTML.
 function el(tag, className, text) {
@@ -219,8 +220,8 @@ function untilText(seconds) {
 }
 
 function closeForm(closed) {
-  $("draft").disabled = closed;
-  $("question").disabled = closed;
+  $("draft").disabled = closed || regionBlocked;
+  $("question").disabled = closed || regionBlocked;
 }
 
 async function loadLimits() {
@@ -228,6 +229,7 @@ async function loadLimits() {
     const response = await fetch("/api/limits");
     if (!response.ok) return;
     const limits = await response.json();
+    if (regionBlocked) return;
     const { sub_questions: questions, rounds, pages } = limits.caps;
     $("quota").textContent =
       `${limits.runs_left} of ${limits.runs_per_day} runs left today. ` +
@@ -378,6 +380,10 @@ async function drive(firstUrl, firstBody) {
         busyFor += busyWait;
         busyWait = Math.min(busyWait * 1.5, BUSY_LONGEST_WAIT_MS);
         ending = "busy";
+      } else if (response.status === 451) {
+        working(false);
+        showBlocked();
+        return;
       } else if (response.status === 429) {
         showRefusal((await response.json()).detail);
         working(false);
@@ -451,6 +457,11 @@ async function startRun(event) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ question }),
     });
+    if (response.status === 451) {
+      closeForm(false);
+      showBlocked();
+      return;
+    }
     if (response.status === 429) {
       closeForm(false);
       showRefusal((await response.json()).detail);
@@ -541,6 +552,28 @@ $("again").addEventListener("click", () => {
   loadLimits();
 });
 
+// Visitors from the EEA, Switzerland and the UK can't start runs, so they get the finished
+// report below instead. The server decides, because only it sees where the request came from.
+async function checkRegion() {
+  try {
+    const response = await fetch("/api/region");
+    if (response.ok && (await response.json()).blocked) showBlocked();
+  } catch {
+    // The server still refuses blocked visitors if this check doesn't load.
+  }
+}
+
+function showBlocked() {
+  regionBlocked = true;
+  closeForm(true);
+  $("quota").textContent = "";
+  notice(
+    "The live AI part of this demo isn't available in the EEA, Switzerland or the UK, because " +
+    "it runs on a free model tier whose terms exclude those regions. Here's a recorded example instead.",
+  );
+}
+
 loadExample();
+checkRegion();
 loadLimits();
 restoreRun();

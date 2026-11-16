@@ -2,7 +2,7 @@
 
 ![ci](https://github.com/ramaraihan12/research-agent/actions/workflows/ci.yml/badge.svg)
 
-**Live demo: https://research-agent-mauve-eight.vercel.app** (no login). It runs on Gemini and Tavily with tight caps and 10 runs a day shared by everyone, so it may ask you to come back tomorrow, but there's a finished report on the page either way. After a quiet spell the first request takes a few extra seconds while the function and the database wake up.
+**Live demo: https://research-agent-mauve-eight.vercel.app** (no login). It runs on Gemini and Tavily with tight caps and 10 runs a day shared by everyone, so it may ask you to come back tomorrow, but there's a finished report on the page either way. The live model is switched off for visitors in the EEA, Switzerland and the UK, because it runs on Gemini's free tier and Google's terms for that tier exclude those regions; they see the finished report only. After a quiet spell the first request takes a few extra seconds while the function and the database wake up.
 
 Ask it a question, it drafts a short research plan, you approve or edit the plan, then it searches the web, reads a few pages, takes notes and writes a small Markdown report with numbered sources. Built with LangGraph and runs on a local Ollama model by default, so it costs nothing to try.
 

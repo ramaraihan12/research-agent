@@ -25,6 +25,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from research_agent.config import Settings, get_settings
 from research_agent.db import open_pool
 from research_agent.guard import Guard
+from research_agent.region import is_blocked, require_allowed_region
 
 if TYPE_CHECKING:
     from research_agent.demo_run import RunSession
@@ -226,7 +227,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         }
 
-    @app.post("/api/runs")
+    @app.get("/api/region")
+    async def region(request: Request, response: Response) -> dict[str, bool]:
+        """Whether the live model is switched off for this visitor, so the page can say so."""
+        # The answer depends on who asks, so a shared cache must never reuse it.
+        response.headers["Cache-Control"] = "private, no-store"
+        return {"blocked": is_blocked(request)}
+
+    @app.post("/api/runs", dependencies=[Depends(require_allowed_region)])
     async def start_run(
         body: StartRun,
         request: Request,
@@ -279,7 +287,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         async with session_tools().open_session(settings, guard, run_id, owner) as session:
             return await session.view()
 
-    @app.post("/api/runs/{run_id}/plan", response_class=EventSourceResponse)
+    @app.post(
+        "/api/runs/{run_id}/plan",
+        response_class=EventSourceResponse,
+        dependencies=[Depends(require_allowed_region)],
+    )
     async def review_plan(
         review: Review, claim: Annotated[Claim, Depends(claim_run("awaiting_approval"))]
     ) -> AsyncIterable[ServerSentEvent]:
@@ -287,7 +299,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         async for event in claim.session.review(review.approved, review.plan):
             yield event
 
-    @app.post("/api/runs/{run_id}/resume", response_class=EventSourceResponse)
+    @app.post(
+        "/api/runs/{run_id}/resume",
+        response_class=EventSourceResponse,
+        dependencies=[Depends(require_allowed_region)],
+    )
     async def resume_run(
         claim: Annotated[Claim, Depends(claim_run("incomplete"))],
     ) -> AsyncIterable[ServerSentEvent]:

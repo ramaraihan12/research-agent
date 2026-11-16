@@ -28,6 +28,7 @@
       <label for="question">Your question</label>
       <textarea id="question" name="question" rows="2" minlength="3" maxlength="300" required
         placeholder="Which TCP port does PostgreSQL listen on by default, and how do you change it?"></textarea>
+      <p class="quiet hint">Please don't enter personal information. Your question goes to a free Gemini model.</p>
       <div class="ask-foot">
         <button id="draft" type="submit">Draft a plan</button>
         <p id="quota" class="quiet" aria-live="polite"></p>
@@ -38,7 +39,7 @@
 
     <section id="plan" class="sheet" aria-labelledby="plan-title" hidden>
       <h2 id="plan-title">Review the plan</h2>
-      <p class="quiet">Nothing is searched until you approve. Edit a line to change what gets looked up.</p>
+      <p class="quiet">Nothing is searched until you approve. Edit a line to change what gets looked up, and keep personal information out of it.</p>
       <ol id="plan-items" class="plan-items"></ol>
       <div class="actions">
         <button id="approve" type="button">Approve plan</button>

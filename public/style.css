@@ -67,6 +67,8 @@ h2 {
   font-size: 1.1875rem;
 }
 
+.ask .hint { margin: 0.5rem 0 0.75rem; font-size: 0.875rem; }
+
 .quiet {
   margin: 0;
   color: var(--ink-soft);
