@@ -222,6 +222,7 @@ async def test_runs_cant_be_listed_and_only_the_demo_routes_exist(app):
     paths = {route.path for route in app.routes}
     assert paths == {
         "/api/limits",
+        "/api/region",
         "/api/runs",
         "/api/runs/{run_id}",
         "/api/runs/{run_id}/plan",
